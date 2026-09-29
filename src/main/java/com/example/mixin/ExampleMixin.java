@@ -6,8 +6,10 @@ import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 
+/** Example server mixin that runs when the server begins loading a level. */
 @Mixin(MinecraftServer.class)
 public class ExampleMixin {
+	/** Injects custom initialization at the start of server level loading. */
 	@Inject(at = @At("HEAD"), method = "loadLevel")
 	private void init(CallbackInfo info) {
 		// This code is injected into the start of MinecraftServer.loadLevel()V

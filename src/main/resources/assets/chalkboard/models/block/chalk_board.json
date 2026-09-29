@@ -1,0 +1,7 @@
+{
+  "parent": "minecraft:block/block",
+  "textures": {
+    "particle": "chalkboard:block/chalk_board"
+  },
+  "elements": []
+}

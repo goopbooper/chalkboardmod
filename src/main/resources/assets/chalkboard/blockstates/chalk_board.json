@@ -1,0 +1,9 @@
+{
+  "multipart": [
+    {
+      "apply": {
+        "model": "chalkboard:block/chalk_board"
+      }
+    }
+  ]
+}

@@ -1,0 +1,6 @@
+{
+  "model": {
+    "type": "minecraft:model",
+    "model": "chalkboard:item/chalk_board"
+  }
+}
