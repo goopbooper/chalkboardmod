@@ -9,17 +9,23 @@ import net.minecraft.client.renderer.blockentity.BlockEntityRendererProvider;
 import net.minecraft.client.renderer.feature.ModelFeatureRenderer;
 import net.minecraft.client.renderer.rendertype.RenderTypes;
 import net.minecraft.client.renderer.state.level.CameraRenderState;
+import net.minecraft.client.renderer.texture.OverlayTexture;
 import net.minecraft.resources.Identifier;
 import net.minecraft.world.phys.Vec3;
 import org.joml.Matrix4f;
 
 public class BoardRenderer implements BlockEntityRenderer<ChalkBoardEntity, BoardRenderState> {
-    
-    private static final Identifier FRAME_TEXTURE = Identifier.fromNamespaceAndPath("chalkboard", "textures/block/chalkboard_frame.png");
 
-    public BoardRenderer(BlockEntityRendererProvider.Context context) {
-        ExampleMod.LOGGER.info("[DEBUG] BoardRenderer initialized!");
-    }
+    private static final Identifier FRAME_TEXTURE =
+            Identifier.fromNamespaceAndPath("chalkboard", "textures/block/chalkboard_frame.png");
+    private static final Identifier FALLBACK_TEXTURE =
+            Identifier.fromNamespaceAndPath("chalkboard", "textures/block/chalk_board.png");
+
+    private static final float FACE_Z = 0.0625f;
+    private static final float FRAME_WIDTH = 0.125f;
+    private static final float FRAME_DEPTH = 0.2f;
+
+    public BoardRenderer(BlockEntityRendererProvider.Context context) {}
 
     @Override
     public BoardRenderState createRenderState() {
@@ -29,181 +35,114 @@ public class BoardRenderer implements BlockEntityRenderer<ChalkBoardEntity, Boar
     @Override
     public void extractRenderState(ChalkBoardEntity entity, BoardRenderState state, float partialTick,
             Vec3 cameraPosition, ModelFeatureRenderer.CrumblingOverlay crumblingOverlay) {
+        // Fills in blockPos, blockState, lightCoords, etc.
         BlockEntityRenderer.super.extractRenderState(entity, state, partialTick, cameraPosition, crumblingOverlay);
 
         Identifier tex = BoardTextureManager.getTexture(entity);
-        state.activeTexture = (tex != null) ? tex : Identifier.fromNamespaceAndPath("chalkboard", "textures/block/chalk_board.png");
-        
+        state.activeTexture = tex != null ? tex : FALLBACK_TEXTURE;
         state.facing = entity.getBlockState().getValue(BoardBlock.FACING);
         state.partIndex = entity.getBlockState().getValue(BoardBlock.INDEX);
-        
-        // Pull actual dynamic size from the block entity or its controller structure
-        // (Adjust these method names to match whatever methods your ChalkBoardEntity provides)
-        state.boardWidth = entity.getBoardWidth();   
-        state.boardHeight = entity.getBoardHeight(); 
-        
-        ExampleMod.LOGGER.info("[DEBUG] extractRenderState pos: {}, index: {}, size: {}x{}", 
-            entity.getBlockPos(), state.partIndex, state.boardWidth, state.boardHeight);
+        state.boardWidth = Math.max(1, entity.getBoardWidth());
+        state.boardHeight = Math.max(1, entity.getBoardHeight());
     }
 
     @Override
     public void submit(BoardRenderState state, PoseStack poses, SubmitNodeCollector collector, CameraRenderState camera) {
-        ExampleMod.LOGGER.info("[DEBUG] submit called for texture: {}, index: {}", state.activeTexture, state.partIndex);
-        
-        if (state.activeTexture == null) {
-            ExampleMod.LOGGER.error("[DEBUG] ABORTING SUBMIT: activeTexture is null!");
-            return;
-        }
-
         poses.pushPose();
 
         poses.translate(0.5f, 0.5f, 0.5f);
-
         float yRot = switch (state.facing) {
-            case NORTH -> 0f;
             case SOUTH -> 180f;
             case WEST -> 90f;
             case EAST -> -90f;
-            default -> 0f;
+            default -> 0f; // NORTH
         };
         poses.rotateDegrees(Axis.YP, yRot);
         poses.translate(-0.5f, -0.5f, -0.4375f);
 
-        // 1. Submit chalkboard face geometry (using dynamic width/height for UV mapping if needed)
-        collector.submitCustomGeometry(poses, RenderTypes.entityTranslucent(state.activeTexture), (pose, consumer) -> {
-            renderBoard(state, pose, consumer);
-        });
+        collector.submitCustomGeometry(poses, RenderTypes.entityTranslucent(state.activeTexture),
+                (pose, consumer) -> renderFace(state, pose, consumer));
 
-        // 2. Submit 3D frame prisms based on actual dynamic dimensions
-        collector.submitCustomGeometry(poses, RenderTypes.entityTranslucent(FRAME_TEXTURE), (pose, consumer) -> {
-            renderOuterBorderPrisms(state, pose, consumer);
-        });
+        collector.submitCustomGeometry(poses, RenderTypes.entityTranslucent(FRAME_TEXTURE),
+                (pose, consumer) -> renderFrame(state, pose, consumer));
 
         poses.popPose();
     }
 
-    private void renderBoard(BoardRenderState state, PoseStack.Pose pose, VertexConsumer consumer) {
-        ExampleMod.LOGGER.info("[DEBUG] renderBoard executing geometry submission for index: {}", state.partIndex);
-        
-        int width = Math.max(1, state.boardWidth);
-        int height = Math.max(1, state.boardHeight);
+    // ---- Chalkboard face ----------------------------------------------------
 
-        int index = state.partIndex;
-        int col = index % width;
-        int row = index / width;
+    private void renderFace(BoardRenderState state, PoseStack.Pose pose, VertexConsumer c) {
+        int col = state.partIndex % state.boardWidth;
+        int row = state.partIndex / state.boardWidth;
+        int rowFromTop = state.boardHeight - 1 - row; // row 0 is the bottom block, V=0 is the top of the texture
 
-        float uStep = 1.0f / width;
-        float vStep = 1.0f / height;
+        float uStep = 1f / state.boardWidth;
+        float vStep = 1f / state.boardHeight;
+        float u0 = col * uStep, u1 = u0 + uStep;
+        float v0 = rowFromTop * vStep, v1 = v0 + vStep;
 
-        float minU = col * uStep;
-        float maxU = (col + 1) * uStep;
-        float minV = row * vStep;
-        float maxV = (row + 1) * vStep;
+        Matrix4f m = pose.pose();
+        int light = state.lightCoords;
 
-        Matrix4f matrix = pose.pose();
+        // Front (+Z). If the image appears mirrored, swap u0 and u1 here.
+        vertex(c, m, 0, 0, FACE_Z, u0, v1, 0, 0, 1, 255, 255, 255, light);
+        vertex(c, m, 1, 0, FACE_Z, u1, v1, 0, 0, 1, 255, 255, 255, light);
+        vertex(c, m, 1, 1, FACE_Z, u1, v0, 0, 0, 1, 255, 255, 255, light);
+        vertex(c, m, 0, 1, FACE_Z, u0, v0, 0, 0, 1, 255, 255, 255, light);
 
-        // Front Face
-        addVertex(consumer, matrix, 0.0f, 0.0f, maxU, maxV, 0.0f, 0.0f, 1.0f, 0.0625f);
-        addVertex(consumer, matrix, 1.0f, 0.0f, minU, maxV, 0.0f, 0.0f, 1.0f, 0.0625f);
-        addVertex(consumer, matrix, 1.0f, 1.0f, minU, minV, 0.0f, 0.0f, 1.0f, 0.0625f);
-        addVertex(consumer, matrix, 0.0f, 1.0f, maxU, minV, 0.0f, 0.0f, 1.0f, 0.0625f);
-
-        // Back Face
-        addVertex(consumer, matrix, 0.0f, 1.0f, maxU, minV, 0.0f, 0.0f, -1.0f, 0.0f);
-        addVertex(consumer, matrix, 1.0f, 1.0f, minU, minV, 0.0f, 0.0f, -1.0f, 0.0f);
-        addVertex(consumer, matrix, 1.0f, 0.0f, minU, maxV, 0.0f, 0.0f, -1.0f, 0.0f);
-        addVertex(consumer, matrix, 0.0f, 0.0f, maxU, maxV, 0.0f, 0.0f, -1.0f, 0.0f);
+        // Back (-Z)
+        vertex(c, m, 1, 0, FACE_Z - 0.001f, u0, v1, 0, 0, -1, 255, 255, 255, light);
+        vertex(c, m, 0, 0, FACE_Z - 0.001f, u1, v1, 0, 0, -1, 255, 255, 255, light);
+        vertex(c, m, 0, 1, FACE_Z - 0.001f, u1, v0, 0, 0, -1, 255, 255, 255, light);
+        vertex(c, m, 1, 1, FACE_Z - 0.001f, u0, v0, 0, 0, -1, 255, 255, 255, light);
     }
 
-    private void renderOuterBorderPrisms(BoardRenderState state, PoseStack.Pose pose, VertexConsumer consumer) {
-        ExampleMod.LOGGER.info("[DEBUG] renderOuterBorderPrisms executing for index: {}", state.partIndex);
-        
-        int width = Math.max(1, state.boardWidth);
-        int height = Math.max(1, state.boardHeight);
+    // ---- Frame ---------------------------------------------------------------
 
-        int index = state.partIndex;
-        int col = index % width;
-        int row = index / width;
+    private void renderFrame(BoardRenderState state, PoseStack.Pose pose, VertexConsumer c) {
+        int col = state.partIndex % state.boardWidth;
+        int row = state.partIndex / state.boardWidth;
 
-        boolean isBottom = (row == 0);
-        boolean isTop = (row == height - 1);
-        boolean isLeft = (col == 0);
-        boolean isRight = (col == width - 1);
+        Matrix4f m = pose.pose();
+        int light = state.lightCoords;
 
-        Matrix4f matrix = pose.pose();
-        float frameDepth = 0.2f;   
-        float frameWidth = 0.125f; 
-
-        if (isTop) {
-            renderBox(consumer, matrix, 0.0f, 1.0f - frameWidth, 1.0f, 1.0f, frameDepth);
-        }
-        if (isBottom) {
-            renderBox(consumer, matrix, 0.0f, 0.0f, 1.0f, frameWidth, frameDepth);
-        }
-        if (isLeft) {
-            renderBox(consumer, matrix, 0.0f, 0.0f, frameWidth, 1.0f, frameDepth);
-        }
-        if (isRight) {
-            renderBox(consumer, matrix, 1.0f - frameWidth, 0.0f, 1.0f, 1.0f, frameDepth);
-        }
+        if (row == state.boardHeight - 1) box(c, m, light, 0, 1 - FRAME_WIDTH, 1, 1);
+        if (row == 0)                     box(c, m, light, 0, 0, 1, FRAME_WIDTH);
+        if (col == 0)                     box(c, m, light, 0, 0, FRAME_WIDTH, 1);
+        if (col == state.boardWidth - 1)  box(c, m, light, 1 - FRAME_WIDTH, 0, 1, 1);
     }
 
-    private void renderBox(VertexConsumer consumer, Matrix4f matrix, float x0, float y0, float x1, float y1, float zDepth) {
+    private void box(VertexConsumer c, Matrix4f m, int light, float x0, float y0, float x1, float y1) {
         float z0 = -0.045f;
-        float z1 = 0.045f + zDepth;
+        float z1 = 0.045f + FRAME_DEPTH;
 
-        // Front Face
-        addQuad(consumer, matrix, x0, y0, z1, x1, y0, z1, x1, y1, z1, x0, y1, z1, 0, 0, 1);
-        // Back Face
-        addQuad(consumer, matrix, x1, y0, z0, x0, y0, z0, x0, y1, z0, x1, y1, z0, 0, 0, -1);
-        // Top Face
-        addQuad(consumer, matrix, x0, y1, z0, x1, y1, z0, x1, y1, z1, x0, y1, z1, 0, 1, 0);
-        // Bottom Face
-        addQuad(consumer, matrix, x0, y0, z1, x1, y0, z1, x1, y0, z0, x0, y0, z0, 0, -1, 0);
-        // Left Face
-        addQuad(consumer, matrix, x0, y0, z0, x0, y0, z1, x0, y1, z1, x0, y1, z0, -1, 0, 0);
-        // Right Face
-        addQuad(consumer, matrix, x1, y0, z1, x1, y0, z0, x1, y1, z0, x1, y1, z1, 1, 0, 0);
+        quad(c, m, light, x0,y0,z1, x1,y0,z1, x1,y1,z1, x0,y1,z1,  0, 0, 1); // front
+        quad(c, m, light, x1,y0,z0, x0,y0,z0, x0,y1,z0, x1,y1,z0,  0, 0,-1); // back
+        quad(c, m, light, x0,y1,z0, x1,y1,z0, x1,y1,z1, x0,y1,z1,  0, 1, 0); // top
+        quad(c, m, light, x0,y0,z1, x1,y0,z1, x1,y0,z0, x0,y0,z0,  0,-1, 0); // bottom
+        quad(c, m, light, x0,y0,z0, x0,y0,z1, x0,y1,z1, x0,y1,z0, -1, 0, 0); // left
+        quad(c, m, light, x1,y0,z1, x1,y0,z0, x1,y1,z0, x1,y1,z1,  1, 0, 0); // right
     }
 
-    private void addQuad(VertexConsumer consumer, Matrix4f matrix,
-                         float ax, float ay, float az,
-                         float bx, float by, float bz,
-                         float cx, float cy, float cz,
-                         float dx, float dy, float dz,
-                         float nx, float ny, float nz) {
-        addVertexPoint(consumer, matrix, ax, ay, az, 0, 1, nx, ny, nz);
-        addVertexPoint(consumer, matrix, bx, by, bz, 1, 1, nx, ny, nz);
-        addVertexPoint(consumer, matrix, cx, cy, cz, 1, 0, nx, ny, nz);
-        addVertexPoint(consumer, matrix, dx, dy, dz, 0, 0, nx, ny, nz);
+    // ---- Helpers ---------------------------------------------------------------
+
+    private void quad(VertexConsumer c, Matrix4f m, int light,
+                      float ax, float ay, float az, float bx, float by, float bz,
+                      float cx, float cy, float cz, float dx, float dy, float dz,
+                      float nx, float ny, float nz) {
+        vertex(c, m, ax, ay, az, 0, 1, nx, ny, nz, 255, 255, 255, light);
+        vertex(c, m, bx, by, bz, 1, 1, nx, ny, nz, 255, 255, 255, light);
+        vertex(c, m, cx, cy, cz, 1, 0, nx, ny, nz, 255, 255, 255, light);
+        vertex(c, m, dx, dy, dz, 0, 0, nx, ny, nz, 255, 255, 255, light);
     }
 
-    private void addVertexPoint(VertexConsumer consumer, Matrix4f matrix, float x, float y, float z, float u, float v, float nx, float ny, float nz) {
-        consumer.addVertex(matrix, x, y, z)
-                .setColor(100, 60, 30, 255)
+    private void vertex(VertexConsumer c, Matrix4f m, float x, float y, float z, float u, float v,
+                        float nx, float ny, float nz, int r, int g, int b, int light) {
+        c.addVertex(m, x, y, z)
+                .setColor(r, g, b, 255)
                 .setUv(u, v)
-                .setUv2(15, 15)
-                .setOverlay(0)
-                .setNormal(nx, ny, nz);
-    }
-
-    private void addVertex(
-            VertexConsumer consumer,
-            Matrix4f matrix,
-            float x,
-            float y,
-            float u,
-            float v,
-            float nx,
-            float ny,
-            float nz,
-            float zLevel
-    ) {
-        consumer.addVertex(matrix, x, y, zLevel)
-                .setColor(0, 255, 0, 255)
-                .setUv(u, v)
-                .setUv2(15, 15)
-                .setOverlay(0)
+                .setOverlay(OverlayTexture.NO_OVERLAY)
+                .setLight(light)
                 .setNormal(nx, ny, nz);
     }
 }
