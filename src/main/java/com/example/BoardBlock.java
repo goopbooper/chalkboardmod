@@ -1,8 +1,10 @@
 package com.example;
 
+
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.util.RandomSource;
+import net.minecraft.world.InteractionResult;
 import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.item.ItemStack;
@@ -22,10 +24,12 @@ import net.minecraft.world.level.ScheduledTickAccess;
 import net.minecraft.world.level.block.state.StateDefinition;
 import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.level.redstone.Orientation;
-
+//import net.minecraft.world.phys.BlockHitResult;
 import java.util.ArrayDeque;
 import java.util.HashSet;
 import java.util.Set;
+
+//import com.example.client.BoardClientHelper;
 
 /** A wall-mounted board block with a state for each structural board part. */
 public class BoardBlock extends BaseEntityBlock {
@@ -52,6 +56,17 @@ public class BoardBlock extends BaseEntityBlock {
         .setValue(INDEX, 0)
 );
     }
+
+
+   /*  @Override
+public InteractionResult useWithoutItem(BlockState state, Level world, BlockPos pos, Player player, BlockHitResult hit) {
+    if (world.isClientSide()) {
+        // Safely call client code here, or call a separate helper method 
+        // located in your client source set.
+        BoardClientHelper.openScreen(pos);
+    }
+    return InteractionResult.SUCCESS;
+} */
 
     /** Creates render state storage for every placed board part. */
     @Override
@@ -299,9 +314,9 @@ public class BoardBlock extends BaseEntityBlock {
                 }
 
                 BlockPos partPos = startPos.offset(
-                        horizontalBuildDir.getStepX() * column,
-                        horizontalBuildDir.getStepY() * column + row,
-                        horizontalBuildDir.getStepZ() * column
+                    horizontalBuildDir.getStepX() * column,
+                    row, // Y always steps up by the row index vertically
+                    horizontalBuildDir.getStepZ() * column
                 );
                 level.setBlock(partPos, surroundingState.setValue(INDEX, blockIndex), 3);
                 setBoardLayout(level, partPos, startPos, width, height);

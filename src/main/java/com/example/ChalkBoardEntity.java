@@ -12,10 +12,12 @@ import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.storage.ValueInput;
 import net.minecraft.world.level.storage.ValueOutput;
 
+
+
 /** Stores the board's ARGB pixels and synchronizes them to clients. */
 public class ChalkBoardEntity extends BlockEntity {
-    private static final int DEFAULT_WIDTH = 16;
-    private static final int DEFAULT_HEIGHT = 16;
+    private static final int DEFAULT_WIDTH = 32;
+    private static final int DEFAULT_HEIGHT = 32;
     private static final int DEFAULT_COLOR = 0xFF3B4B2E;
 
     /** Width of the in-memory pixel image. */
@@ -135,35 +137,39 @@ public class ChalkBoardEntity extends BlockEntity {
         this.level.sendBlockUpdated(this.worldPosition, state, state, Block.UPDATE_ALL);
     }
     
-    @Override
+@Override
     protected void saveAdditional(ValueOutput output) {
         super.saveAdditional(output);
         output.putInt("TextureWidth", this.textureWidth);
         output.putInt("TextureHeight", this.textureHeight);
-        output.putIntArray("TexturePixels", this.texturePixels);
-        output.putLong("ControllerPos", this.controllerPos.asLong());
         output.putInt("BoardWidth", this.boardWidth);
         output.putInt("BoardHeight", this.boardHeight);
+        output.putLong("ControllerPos", this.controllerPos.asLong());
+        
+        // Directly save the int array using ValueOutput's built-in method
+        output.putIntArray("TexturePixels", this.texturePixels);
     }
 
     @Override
     protected void loadAdditional(ValueInput input) {
         super.loadAdditional(input);
 
-        int width = input.getIntOr("TextureWidth", DEFAULT_WIDTH);
-        int height = input.getIntOr("TextureHeight", DEFAULT_HEIGHT);
-        int[] pixels = input.getIntArray("TexturePixels").orElseGet(ChalkBoardEntity::createDefaultPixels);
-
-        if (width > 0 && height > 0 && pixels.length == width * height) {
-            this.textureWidth = width;
-            this.textureHeight = height;
-            this.texturePixels = pixels;
-            this.textureVersion++;
-        }
-
-        this.controllerPos = BlockPos.of(input.getLongOr("ControllerPos", this.getBlockPos().asLong()));
+        this.textureWidth = input.getIntOr("TextureWidth", DEFAULT_WIDTH);
+        this.textureHeight = input.getIntOr("TextureHeight", DEFAULT_HEIGHT);
         this.boardWidth = input.getIntOr("BoardWidth", 1);
         this.boardHeight = input.getIntOr("BoardHeight", 1);
+        
+        // Use getIntOr with a default fallback block position coordinate (or the current position fallback)
+        long defaultPos = this.getBlockPos() != null ? this.getBlockPos().asLong() : 0L;
+        this.controllerPos = BlockPos.of(input.getLongOr("ControllerPos", defaultPos));
+
+        // Safely fetch the int array using ValueInput's optional getter
+        input.getIntArray("TexturePixels").ifPresent(pixels -> {
+            if (this.textureWidth > 0 && this.textureHeight > 0 && pixels.length == this.textureWidth * this.textureHeight) {
+                this.texturePixels = pixels;
+                this.textureVersion++;
+            }
+        });
     }
 
     private static int[] createDefaultPixels() {
